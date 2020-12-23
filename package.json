@@ -1,0 +1,42 @@
+{
+  "name": "homebridge-crestron-crosscolours",
+  "version": "1.0.0",
+  "description": "Crestron crosscolours ",
+  "main": "dist/homebridge-crestron-crosscolours.js",
+  "scripts": {
+    "clean": "rimraf ./dist",
+    "build": "rimraf ./dist && tsc",
+    "prepublishOnly": "npm run build",
+    "postpublish": "npm run clean",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Pulse Group <info@pulsegroupb2b.com>",
+  "engines": {
+    "homebridge": ">=1.0.0"
+  },
+  "license": "ISC",
+  "keywords": [
+    "homebridge-plugin"
+  ],
+  "files": [
+    "LICENSE",
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/dgrothman/homebridge-crestron-crosscolours.git"
+  },
+  "bugs": {
+    "url": "http://github.com/dgrothman/homebridge-crestron-crosscolours/issues"
+  },
+  "devDependencies": {
+    "@types/node": "10.17.19",
+    "homebridge": "^1.0.4",
+    "jest": "^26.6.3",
+    "rimraf": "^3.0.2",
+    "typescript": "^3.8.3"
+  },
+  "dependencies": {
+    "python-struct": "^1.1.3"
+  }
+}
