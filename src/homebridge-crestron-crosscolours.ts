@@ -1,21 +1,20 @@
-import http, {IncomingMessage, Server, ServerResponse} from "http";
 import {
-  AccessoryName, AccessoryPluginConstructor,
   API,
   APIEvent,
   CharacteristicEventTypes,
   CharacteristicSetCallback,
   CharacteristicValue,
   DynamicPlatformPlugin,
-  HAP, HAPLegacyTypes, Logger,
+  HAP,
   Logging,
   PlatformAccessory,
   PlatformAccessoryEvent,
-  PlatformConfig, PlatformIdentifier, PlatformName, PlatformPluginConstructor, PluginIdentifier, User,
-    Service
+  PlatformConfig,
+  PlatformIdentifier,
+  PlatformName,
+  Service
 } from "homebridge";
 import {Socket} from "net";
-import {LogLevel} from "homebridge/lib/logger";
 
 const PLUGIN_NAME = "homebridge-crestron-crosscolours";
 const PLATFORM_NAME = "CrestronCrossColours";
@@ -45,43 +44,38 @@ const struct = require('python-struct');
  */
 let hap: HAP;
 let Accessory: typeof PlatformAccessory;
-
 export = (api: API) => {
   hap = api.hap;
   Accessory = api.platformAccessory;
-
   api.registerPlatform(PLATFORM_NAME, CrestronCrossColoursPlatform);
 };
 class CrestronCrossColoursConfig implements PlatformConfig {
   platform: PlatformName | PlatformIdentifier;
   ipAddress: string;
   port: number;
-  accessories: PlatformAccessory[];
+  accessories: CrossColourAccessory[];
 }
-
+interface CrossColourAccessory extends PlatformAccessory {
+  id: number;
+  type: string;
+  subtype: string;
+}
 class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
 
   private readonly log: Logging;
   private readonly api: API;
-
   private readonly config: CrestronCrossColoursConfig;
-  private client: Socket = new Socket();
-  private readonly ipAddress: string = '192.168.0.249';
-  private readonly port: number = 41900;
-  private accessories: PlatformAccessory[] = [];
+  private accessories: any[] = [];
+  readonly processor: CrestronProcessor;
 
   constructor(log: Logging, config: CrestronCrossColoursConfig, api: API) {
     this.log = log;
     this.api = api;
     this.accessories = [];
     this.config = config;
-    // probably parse config or something here
 
+    this.processor = new CrestronProcessor(config.ipAddress, config.port, log, false);
     log.info("CCCP finished initializing!");
-
-    log.info(`CCCP connection info: ${config.ipAddress}:${config.port}`);
-    this.ipAddress = config.ipAddress;
-    this.port = config.port;
 
     /*
      * When this event is fired, homebridge restored all cached accessories from disk and did call their respective
@@ -91,9 +85,28 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
      */
     api.on(APIEvent.DID_FINISH_LAUNCHING, () => {
       log.info("CrestronCrossColours platform 'didFinishLaunching'");
+      // Remove deleted ones
+      let requireRemoval = [];
+      this.accessories.forEach((accessory) => {
+        if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
+          this.log.info(`Removing accessory not found in config ${accessory.displayName}`);
+          requireRemoval.push(new this.api.platformAccessory(accessory.displayName, accessory.UUID));
+        }
+      });
+      this.log.info(`Removing ${requireRemoval.length} items`);
+      requireRemoval.forEach(item => {
+        this.accessories = this.accessories.filter(obj => obj !== item);
+        this.api.unregisterPlatformAccessories(PLUGIN_NAME,PLATFORM_NAME,requireRemoval);
+      })
+
+      // Add new ones
+      this.config.accessories.forEach((accessory) => {
+        if(!this.accessories.find(existing => existing.displayName === accessory.displayName)) {
+
+          this.addAccessory(accessory)
+        }
+      });
     });
-    this.connectToServer();
-    this.readConfig();
   };
 
   /*
@@ -101,43 +114,142 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
    * It should be used to setup event handlers for characteristics and update respective values.
    */
   configureAccessory(accessory: PlatformAccessory): void {
-    this.log("Configuring accessory %s", accessory.displayName);
+    this.log(`Configuring accessory ${accessory.displayName} with UUID ${accessory.UUID}`);
+    if(accessory.UUID === undefined) {
+      accessory.UUID = this.api.hap.uuid.generate(accessory.displayName);
+    }
+
+    if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
+      this.log.info(`Ignoring removed accessory not found in config ${accessory.displayName}`);
+      return;
+    }
 
     this.accessories.push(accessory);
     accessory.on(PlatformAccessoryEvent.IDENTIFY, () => {
-      this.log("%s identified!", accessory.displayName);
+      this.log(`${accessory.displayName} identified!`);
     });
 
-    accessory.getService(hap.Service.Lightbulb)!.getCharacteristic(hap.Characteristic.On)
-        .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-          this.log.info("%s Light was set to: " + value);
-          callback();
-        });
-
-    this.accessories.push(accessory);
+    this.log(`Setting up accessory type of ${accessory.context.type}`);
+    switch (accessory.context.type) {
+      case 'Lightbulb':
+        this.log.info(`Found a Lightbulb accessory to configure`);
+        const lightbulbService = accessory.getService(hap.Service.Lightbulb);
+        lightbulbService!.getCharacteristic(hap.Characteristic.On)
+            .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+              this.log.info(`${accessory.displayName} Light was set to: ${value}`);
+              accessory.context.power = (value > 0);
+              if (accessory.context.power && accessory.context.bri == 0) {
+                accessory.context.bri = 100;
+              } else {
+                accessory.context.bri = 0;
+              }
+              this.processor.loadDim(accessory.context.id, +!!accessory.context.power * accessory.context.bri);
+              callback(null);
+            })
+            .on(hap.CharacteristicEventTypes.GET, (callback) => {
+              this.log.debug(`getPower ${accessory.context.id} = ${accessory.context.power}`);
+              callback(null, accessory.context.power);
+            });
+            if(accessory.context.subtype == "dimmer" || accessory.context.subtype == "rgb") {
+              lightbulbService.getCharacteristic(hap.Characteristic.Brightness)
+                  .on(hap.CharacteristicEventTypes.SET, (level : CharacteristicValue, callback: CharacteristicSetCallback) => {
+                    this.log.debug(`setBrightness ${accessory.context.id} = ${level}`);
+                    accessory.context.bri = parseInt(level.toString());
+                    accessory.context.power = (accessory.context.bri > 0);
+                    this.processor.loadDim(accessory.context.id, +!!accessory.context.power * accessory.context.bri);
+                    callback(null);
+                  })
+                  .on(hap.CharacteristicEventTypes.GET, (callback) => {
+                    this.log(`getBrightness ${accessory.context.id} = ${accessory.context.bri}`);
+                    callback(null, accessory.context.bri);
+                  })
+            }
+            if (accessory.context.subtype == "rgb") {
+              lightbulbService.getCharacteristic(hap.Characteristic.Saturation)
+                  .on(hap.CharacteristicEventTypes.SET, (level, callback) => {
+                    accessory.context.power = true;
+                    accessory.context.sat = level;
+                    this.processor.rgbLoadDissolveHSL(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
+                    callback(null);
+                  })
+                  .on(hap.CharacteristicEventTypes.GET, (callback) => {
+                    callback(null, accessory.context.sat);
+                  });
+              lightbulbService.getCharacteristic(hap.Characteristic.Hue)
+                  .on(hap.CharacteristicEventTypes.SET, (level, callback) => {
+                    accessory.context.power = true;
+                    accessory.context.hue = level;
+                    this.processor.rgbLoadDissolveHSL(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
+                    callback(null);
+                  })
+                  .on(hap.CharacteristicEventTypes.GET, (callback) => {
+                    callback(null, accessory.context.hue);
+                  });
+            }
+        break;
+      case 'WindowCovering':
+        this.log.info(`Found a WindowCovering accessory to configure`);
+        accessory.getService(hap.Service.WindowCovering)!.getCharacteristic(hap.Characteristic.TargetPosition)
+            .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+              this.log.info(`${accessory.displayName} WindowCovering was set to: ${value}`);
+              callback();
+            });
+        break;
+    }
   }
 
-  readConfig() {
-    // Remove deleted ones
-    let requireRemoval = [];
-    this.accessories.forEach((accessory) => {
-      if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
-        requireRemoval.push(accessory);
-      }
-    });
-    this.accessories = this.accessories.filter(item => {
-      return requireRemoval.find(accessory => accessory === item)
-    });
-    this.api.unregisterPlatformAccessories(PLUGIN_NAME,PLATFORM_NAME,requireRemoval);
+  // --------------------------- CUSTOM METHODS ---------------------------
 
-    // Add new ones
-    this.config.accessories.forEach((accessory) => {
-      if(!this.accessories.find(existing => existing.displayName === accessory.displayName)) {
-        this.addAccessory(accessory.displayName,accessory.services)
-      }
-    });
+  addAccessory(accessory: CrossColourAccessory) {
+    this.log.info(`Adding new accessory with name ${accessory.displayName}`);
+
+    // uuid must be generated from a unique but not changing data source, name should not be used in the most cases. But works in this specific example.
+    const uuid = hap.uuid.generate(accessory.displayName);
+    const newAccessory = new Accessory(accessory.displayName, uuid);
+    newAccessory.context.id = accessory.id;
+    newAccessory.context.type = accessory.type
+    newAccessory.context.subtype = accessory.subtype;
+    const service = new Service.AccessoryInformation();
+    service.setCharacteristic(hap.Characteristic.Name, accessory.displayName)
+        .setCharacteristic(hap.Characteristic.Manufacturer, "Crestron")
+        .setCharacteristic(hap.Characteristic.Model, accessory.type + " Device")
+        .setCharacteristic(hap.Characteristic.SerialNumber, "ID " + accessory.id);
+
+    switch (accessory.type) {
+      case 'Lightbulb':
+        newAccessory.addService(Service.Lightbulb,accessory.displayName);
+        newAccessory.context.bri = 100;
+        newAccessory.context.power = false;
+        newAccessory.context.sat = 0;
+        newAccessory.context.hue = 0;
+        break;
+      case 'WindowCovering':
+        newAccessory.addService(Service.WindowCovering,accessory.displayName);
+        break;
+    }
+
+    this.configureAccessory(newAccessory); // abusing the configureAccessory here
+
+    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [newAccessory]);
   }
+  // ----------------------------------------------------------------------
+
+}
+class CrestronProcessor {
+  private readonly ipAddress: string;
+  private readonly port: number;
+  private client: Socket = new Socket();
+  private readonly log: Logging;
+
+  constructor(ipAddress: string, port: number, log: Logging, useCache: boolean) {
+    this.ipAddress = ipAddress;
+    this.port = port;
+    this.log = log;
+    this.connectToServer();
+  }
+
   connectToServer() {
+    this.log.info(`CCCP connection info: ${this.ipAddress}:${this.port}`);
     this.log.info("CrestronCrossColours ConnectingToServer");
     this.client.connect(this.port, this.ipAddress);
     this.client.on('connect', () => {
@@ -172,10 +284,11 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
         this.log.info(`Received serial join ${serialJoin} with value of ${serialValue.toString()} `)
       }
     }.bind(this));
-    this.client.on('close',function() {
+    this.client.on('close',async function () {
       this.log.info('connection closed');
       try {
-        this.client.connect(this.port, this.ipAddress);
+        //await(500);
+        //this.client.connect(this.port, this.ipAddress);
       } catch (err) {
         this.log.error(`CCCP Error reconnecting to server, ${err}`);
       }
@@ -218,135 +331,13 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
     this.sendData(serialData);
   }
 
-
-  // --------------------------- CUSTOM METHODS ---------------------------
-
-  addAccessory(name: string, service: Service[]) {
-    this.log.info(`Adding new accessory with name ${name}`);
-
-    // uuid must be generated from a unique but not changing data source, name should not be used in the most cases. But works in this specific example.
-    const uuid = hap.uuid.generate(name);
-    const accessory = new Accessory(name, uuid);
-
-    service.forEach(service => {
-      accessory.addService(service, "");
-    });
-
-    this.configureAccessory(accessory); // abusing the configureAccessory here
-
-    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+  loadDim(id, level, time?) {
+    var thisTime = time || 1;
   }
-
-  removeAccessories() {
-    // we don't have any special identifiers, we just remove all our accessories
-
-    this.log.info("Removing all accessories");
-
-    this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, this.accessories);
-    this.accessories.splice(0, this.accessories.length); // clear out the array
+  rgbLoadDissolveHSL(id, h, s, l, time?) {
+    var thisTime = time || 500;
   }
+  getLoadStatus(id) {
 
-
-  // ----------------------------------------------------------------------
-
-}
-
-
-//Testing
-// @ts-ignore
-class TestLogger implements Logging{
-  prefix: string = '';
-
-  debug(message: string, ...parameters: any[]): void {
-    console.debug(message);
-  }
-
-  error(message: string, ...parameters: any[]): void {
-    console.error(message);
-  }
-
-  info(message: string, ...parameters: any[]): void {
-    console.info(message);
-  }
-
-  log(level: LogLevel, message: string, ...parameters: any[]): void {
-    console.log(message);
-  }
-
-  warn(message: string, ...parameters: any[]): void {
-    console.warn(message);
   }
 }
-class TestApi implements API{
-  // @ts-ignore
-  readonly hap: HAP;
-  // @ts-ignore
-  readonly hapLegacyTypes: HAPLegacyTypes;
-  // @ts-ignore
-  readonly platformAccessory: typeof PlatformAccessory;
-  // @ts-ignore
-  readonly serverVersion: string;
-  // @ts-ignore
-  readonly user: typeof User;
-  // @ts-ignore
-  readonly version: number;
-
-  on(event: "didFinishLaunching", listener: () => void): this;
-  on(event: "shutdown", listener: () => void): this;
-  on(event: "didFinishLaunching" | "shutdown", listener: () => void): this {
-    // @ts-ignore
-    return undefined;
-  }
-
-  publishCameraAccessories(pluginIdentifier: PluginIdentifier, accessories: PlatformAccessory[]): void {
-  }
-
-  publishExternalAccessories(pluginIdentifier: PluginIdentifier, accessories: PlatformAccessory[]): void {
-  }
-
-  registerAccessory(accessoryName: AccessoryName, constructor: AccessoryPluginConstructor): void;
-  registerAccessory(pluginIdentifier: PluginIdentifier, accessoryName: AccessoryName, constructor: AccessoryPluginConstructor): void;
-  registerAccessory(accessoryName: AccessoryName | PluginIdentifier, constructor: AccessoryPluginConstructor | AccessoryName): void {
-  }
-
-  registerPlatform(platformName: PlatformName, constructor: PlatformPluginConstructor): void;
-  registerPlatform(pluginIdentifier: PluginIdentifier, platformName: PlatformName, constructor: PlatformPluginConstructor): void;
-  registerPlatform(platformName: PlatformName | PluginIdentifier, constructor: PlatformPluginConstructor | PlatformName): void {
-  }
-
-  registerPlatformAccessories(pluginIdentifier: PluginIdentifier, platformName: PlatformName, accessories: PlatformAccessory[]): void {
-  }
-
-  unregisterPlatformAccessories(pluginIdentifier: PluginIdentifier, platformName: PlatformName, accessories: PlatformAccessory[]): void {
-  }
-
-  updatePlatformAccessories(accessories: PlatformAccessory[]): void {
-  }
-}
-/*
-const testApi = new TestApi()
-// @ts-ignore
-const processor = new CrestronCrossColoursPlatform(new TestLogger(),{
-      "platform": "CrestronCrossColours",
-      "name": "CrestronCrossColours",
-      "ipAddress": '192.168.0.249',
-      "port": 41900,
-      "accessories": [
-        {
-          "id": 1,
-          "services": ["Lightbulb"],
-          "displayName": "Marcus Sidelight"
-        },
-        {
-          "id": 2,
-          "services": ["Lightbulb"],
-          "displayName": "Casey Sidelight"
-        },
-        {
-          "id": 3,
-          "services": ["Lightbulb"],
-          "displayName": "Bathroom"
-        },
-      ]
-  },testApi);
- */
