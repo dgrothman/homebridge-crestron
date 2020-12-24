@@ -58,6 +58,7 @@ class CrestronCrossColoursConfig implements PlatformConfig {
   port: number;
   accessories: PlatformAccessory[];
 }
+
 class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
 
   private readonly log: Logging;
@@ -81,6 +82,7 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
     log.info(`CCCP connection info: ${config.ipAddress}:${config.port}`);
     this.ipAddress = config.ipAddress;
     this.port = config.port;
+
     /*
      * When this event is fired, homebridge restored all cached accessories from disk and did call their respective
      * `configureAccessory` method for all of them. Dynamic Platform plugins should only register new accessories
@@ -89,28 +91,9 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
      */
     api.on(APIEvent.DID_FINISH_LAUNCHING, () => {
       log.info("CrestronCrossColours platform 'didFinishLaunching'");
-
-      // Remove deleted ones
-      let requireRemoval = [];
-      this.accessories.forEach((accessory) => {
-        if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
-          requireRemoval.push(accessory);
-        }
-      });
-      this.accessories = this.accessories.filter(item => {
-        return requireRemoval.find(accessory => accessory === item)
-      });
-      this.api.unregisterPlatformAccessories(PLUGIN_NAME,PLATFORM_NAME,requireRemoval);
-
-      // Add new ones
-      this.config.accessories.forEach((accessory) => {
-        if(!this.accessories.find(existing => existing.displayName === accessory.displayName)) {
-          this.addAccessory(accessory.displayName,accessory.services)
-        }
-      });
     });
-
     this.connectToServer();
+    this.readConfig();
   };
 
   /*
@@ -134,6 +117,26 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
+  readConfig() {
+    // Remove deleted ones
+    let requireRemoval = [];
+    this.accessories.forEach((accessory) => {
+      if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
+        requireRemoval.push(accessory);
+      }
+    });
+    this.accessories = this.accessories.filter(item => {
+      return requireRemoval.find(accessory => accessory === item)
+    });
+    this.api.unregisterPlatformAccessories(PLUGIN_NAME,PLATFORM_NAME,requireRemoval);
+
+    // Add new ones
+    this.config.accessories.forEach((accessory) => {
+      if(!this.accessories.find(existing => existing.displayName === accessory.displayName)) {
+        this.addAccessory(accessory.displayName,accessory.services)
+      }
+    });
+  }
   connectToServer() {
     this.log.info("CrestronCrossColours ConnectingToServer");
     this.client.connect(this.port, this.ipAddress);
@@ -219,7 +222,7 @@ class CrestronCrossColoursPlatform implements DynamicPlatformPlugin {
   // --------------------------- CUSTOM METHODS ---------------------------
 
   addAccessory(name: string, service: Service[]) {
-    this.log.info("Adding new accessory with name %s", name);
+    this.log.info(`Adding new accessory with name ${name}`);
 
     // uuid must be generated from a unique but not changing data source, name should not be used in the most cases. But works in this specific example.
     const uuid = hap.uuid.generate(name);
@@ -319,8 +322,9 @@ class TestApi implements API{
 
   updatePlatformAccessories(accessories: PlatformAccessory[]): void {
   }
-
 }
+/*
+const testApi = new TestApi()
 // @ts-ignore
 const processor = new CrestronCrossColoursPlatform(new TestLogger(),{
       "platform": "CrestronCrossColours",
@@ -330,18 +334,19 @@ const processor = new CrestronCrossColoursPlatform(new TestLogger(),{
       "accessories": [
         {
           "id": 1,
-          "type": "Lightbulb",
-          "name": "Marcus Sidelight"
+          "services": ["Lightbulb"],
+          "displayName": "Marcus Sidelight"
         },
         {
           "id": 2,
-          "type": "Lightbulb",
-          "name": "Casey Sidelight"
+          "services": ["Lightbulb"],
+          "displayName": "Casey Sidelight"
         },
         {
           "id": 3,
-          "type": "Lightbulb",
-          "name": "Bathroom"
+          "services": ["Lightbulb"],
+          "displayName": "Bathroom"
         },
       ]
-  },new TestApi);
+  },testApi);
+ */
