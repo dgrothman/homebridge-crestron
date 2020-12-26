@@ -22,12 +22,6 @@
         "type": "number",
         "required": true,
         "default": "41900"
-      },
-      "ipaddress": {
-        "title": "Ip Address",
-        "type": "string",
-        "required": true,
-        "default": "192.168.0.200"
       }
     }
   }

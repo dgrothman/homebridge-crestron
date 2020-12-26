@@ -57,15 +57,6 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
    */
   configureAccessory(accessory: PlatformAccessory): void {
     this.log.info(`Configuring accessory ${accessory.displayName} with UUID ${accessory.UUID}`);
-    if(accessory.UUID === undefined) {
-      accessory.UUID = this.HAP.uuid.generate(accessory.displayName);
-    }
-
-    // @ts-ignore
-    if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
-      this.log.info(`Ignoring removed accessory not found in config ${accessory.displayName}`);
-      return;
-    }
 
     this.accessories.push(accessory);
     accessory.on(PlatformAccessoryEvent.IDENTIFY, () => {
