@@ -1,0 +1,34 @@
+{
+  "pluginAlias": "CrestronCrossColours",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "required": true,
+        "default": "Crestron CrossColours Platform"
+      },
+      "ipaddress": {
+        "title": "Ip Address",
+        "type": "string",
+        "required": true,
+        "default": "192.168.0.200"
+      },
+      "port": {
+        "title": "Server Port",
+        "type": "number",
+        "required": true,
+        "default": "41900"
+      },
+      "ipaddress": {
+        "title": "Ip Address",
+        "type": "string",
+        "required": true,
+        "default": "192.168.0.200"
+      }
+    }
+  }
+}
