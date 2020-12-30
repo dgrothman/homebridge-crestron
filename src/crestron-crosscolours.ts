@@ -12,7 +12,6 @@ import {
   Service
 } from "homebridge";
 
-import {CrossColourAccessory} from "./cross-colours-accessory";
 import {PLATFORM_NAME, PLUGIN_NAME} from "./settings";
 import {CrestronProcessor} from "./crestron-processor";
 
@@ -36,7 +35,7 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
       public readonly api: API,
   ) {
     // @ts-ignore
-    this.Processor = new CrestronProcessor(config.ipAddress, config.port, log, false);
+    this.Processor = new CrestronProcessor(config.ipAddress, config.port, log, config.slot);
     this.log.debug("CCCP finished initializing!");
 
     /*
@@ -47,7 +46,7 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
      */
     api.on(APIEvent.DID_FINISH_LAUNCHING, () => {
       this.log.debug("CrestronCrossColours platform 'didFinishLaunching'");
-      this.discoverDevices();
+      this.discoverDevices().then(() => {});
     });
   };
 
@@ -63,6 +62,7 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
       this.log.info(`${accessory.displayName} identified!`);
     });
 
+    if(accessory.context.type == undefined) return;
     this.log.info(`Setting up accessory type of ${accessory.context.type}`);
     switch (accessory.context.type) {
       case 'Lightbulb':
@@ -70,129 +70,157 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
         const lightbulbService = accessory.getService(this.Service.Lightbulb);
         if(lightbulbService === undefined) return;
         lightbulbService!.getCharacteristic(this.Characteristic.On)
-            .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-              this.log.info(`${accessory.displayName} Light was set to: ${value}`);
-              accessory.context.power = (value > 0);
-              if (accessory.context.power && accessory.context.bri == 0) {
-                accessory.context.bri = 100;
-              } else {
-                accessory.context.bri = 0;
-              }
-              this.Processor.loadDim(accessory.context.id, +!!accessory.context.power * accessory.context.bri);
+          .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+            this.log.info(`${accessory.displayName} Light was set to: ${value}`);
+            accessory.context.power = (value > 0);
+            if (accessory.context.power && accessory.context.bri == 0) {
+              accessory.context.bri = 100;
+            } else {
+              accessory.context.bri = 0;
+            }
+            this.Processor.loadDim(accessory.context.id, +!!accessory.context.power * accessory.context.bri);
+            callback(null);
+          })
+          .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
+            this.log.debug(`getPower ${accessory.context.id} = ${accessory.context.power}`);
+            callback(null, accessory.context.power);
+          });
+        if(accessory.context.subtype == "dimmer" || accessory.context.subtype == "rgb") {
+          this.log.info(`Light is dimmable`);
+          lightbulbService.getCharacteristic(this.Characteristic.Brightness)
+            .on(this.HAP.CharacteristicEventTypes.SET, (level : CharacteristicValue, callback: CharacteristicSetCallback) => {
+              this.log.debug(`setBrightness ${accessory.context.id} = ${level}`);
+              accessory.context.bri = parseInt(level.toString());
+              accessory.context.power = (accessory.context.bri > 0);
+              this.Processor.loadDim(accessory.context.id, accessory.context.bri);
               callback(null);
             })
             .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
-              this.log.debug(`getPower ${accessory.context.id} = ${accessory.context.power}`);
-              callback(null, accessory.context.power);
+              this.log.info(`getBrightness ${accessory.context.id} = ${accessory.context.bri}`);
+              accessory.context.bri = this.Processor.getLightLevel(accessory.context.id);
+              callback(null, accessory.context.bri);
+            })
+        }
+        if (accessory.context.subtype == "rgb") {
+          this.log.info(`Light is rgb`);
+          lightbulbService.getCharacteristic(this.Characteristic.Saturation)
+            .on(this.HAP.CharacteristicEventTypes.SET, (level, callback) => {
+              accessory.context.power = true;
+              accessory.context.sat = level;
+              this.Processor.loadRgbChange(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
+              callback(null);
+            })
+            .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
+              accessory.context.sat = this.Processor.getLightSat(accessory.context.id);
+              callback(null, accessory.context.sat);
             });
-            if(accessory.context.subtype == "dimmer" || accessory.context.subtype == "rgb") {
-              lightbulbService.getCharacteristic(this.Characteristic.Brightness)
-                  .on(this.HAP.CharacteristicEventTypes.SET, (level : CharacteristicValue, callback: CharacteristicSetCallback) => {
-                    this.log.debug(`setBrightness ${accessory.context.id} = ${level}`);
-                    accessory.context.bri = parseInt(level.toString());
-                    accessory.context.power = (accessory.context.bri > 0);
-                    this.Processor.loadDim(accessory.context.id, +!!accessory.context.power * accessory.context.bri);
-                    callback(null);
-                  })
-                  .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
-                    this.log.info(`getBrightness ${accessory.context.id} = ${accessory.context.bri}`);
-                    callback(null, accessory.context.bri);
-                  })
-            }
-            if (accessory.context.subtype == "rgb") {
-              lightbulbService.getCharacteristic(this.Characteristic.Saturation)
-                  .on(this.HAP.CharacteristicEventTypes.SET, (level, callback) => {
-                    accessory.context.power = true;
-                    accessory.context.sat = level;
-                    this.Processor.rgbLoadDissolveHSL(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
-                    callback(null);
-                  })
-                  .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
-                    callback(null, accessory.context.sat);
-                  });
-              lightbulbService.getCharacteristic(this.Characteristic.Hue)
-                  .on(this.HAP.CharacteristicEventTypes.SET, (level, callback) => {
-                    accessory.context.power = true;
-                    accessory.context.hue = level;
-                    this.Processor.rgbLoadDissolveHSL(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
-                    callback(null);
-                  })
-                  .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
-                    callback(null, accessory.context.hue);
-                  });
-            }
+          lightbulbService.getCharacteristic(this.Characteristic.Hue)
+            .on(this.HAP.CharacteristicEventTypes.SET, (level, callback) => {
+              accessory.context.power = true;
+              accessory.context.hue = level;
+              this.Processor.loadRgbChange(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
+              callback(null);
+            })
+            .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
+              accessory.context.hue = this.Processor.getLightHue(accessory.context.id);
+              callback(null, accessory.context.hue);
+            });
+        }
         break;
       case 'WindowCovering':
         this.log.info(`Found a WindowCovering accessory to configure`);
         accessory.getService(this.Service.WindowCovering)!.getCharacteristic(this.Characteristic.TargetPosition)
-            .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-              this.log.info(`${accessory.displayName} WindowCovering was set to: ${value}`);
-              callback();
-            });
+          .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
+            this.log.info(`${accessory.displayName} WindowCovering was set to: ${value}`);
+            accessory.context.position = value;
+            this.Processor.setWindowPosition(accessory.context.id,value);
+            callback(null);
+          })
+          .on(CharacteristicEventTypes.GET, (callback) => {
+            accessory.context.position = this.Processor.getWindowPosition(accessory.context.id);
+            callback(null, accessory.context.position);
+          })
         break;
     }
   }
 
   // --------------------------- CUSTOM METHODS ---------------------------
 
-  addAccessory(accessory: CrossColourAccessory) {
+  addAccessory(accessory: PlatformAccessory) {
     this.log.info(`Adding new accessory with name ${accessory.displayName}`);
 
-    // uuid must be generated from a unique but not changing data source, name should not be used in the most cases. But works in this specific example.
-    const uuid = this.HAP.uuid.generate(accessory.displayName);
-    const newAccessory = new this.Accessory(accessory.displayName, uuid);
-    newAccessory.context.id = accessory.id;
-    newAccessory.context.type = accessory.type
-    newAccessory.context.subtype = accessory.subtype;
     const service = new this.Service.AccessoryInformation();
     service.setCharacteristic(this.Characteristic.Name, accessory.displayName)
         .setCharacteristic(this.Characteristic.Manufacturer, "Crestron")
-        .setCharacteristic(this.Characteristic.Model, accessory.type + " Device")
-        .setCharacteristic(this.Characteristic.SerialNumber, "ID " + accessory.id);
+        .setCharacteristic(this.Characteristic.Model, accessory.context.type + " Device")
+        .setCharacteristic(this.Characteristic.SerialNumber, "ID " + accessory.context.id);
 
-    switch (accessory.type) {
+    switch (accessory.context.type) {
       case 'Lightbulb':
-        newAccessory.addService(this.Service.Lightbulb,accessory.displayName);
-        newAccessory.context.bri = 100;
-        newAccessory.context.power = false;
-        newAccessory.context.sat = 0;
-        newAccessory.context.hue = 0;
+        accessory.addService(this.Service.Lightbulb,accessory.displayName);
+        accessory.context.bri = 100;
+        accessory.context.power = false;
+        accessory.context.sat = 0;
+        accessory.context.hue = 0;
         break;
       case 'WindowCovering':
-        newAccessory.addService(this.Service.WindowCovering,accessory.displayName);
+        accessory.addService(this.Service.WindowCovering,accessory.displayName);
         break;
     }
 
-    this.configureAccessory(newAccessory); // abusing the configureAccessory here
+    this.configureAccessory(accessory); // abusing the configureAccessory here
 
-    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [newAccessory]);
+    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
   }
   // ----------------------------------------------------------------------
+    private async discoverDevices() {
+      this.log.info('discoverDevices');
+      // Get Lights
+      const lights = await this.Processor.getLights();
+      lights.forEach((load) => {
+        const uuid = this.HAP.uuid.generate(`${load.displayName}${load.id}`);
+        if(this.accessories.find(accessory => accessory.UUID === uuid)) return;
+        this.log.info(`Adding light ${uuid}`);
+        const newAccessory = new this.Accessory(`${load.displayName}${load.id}`, uuid);
+        newAccessory.context.id = load.id;
+        newAccessory.context.type = 'Lightbulb'
+        newAccessory.context.subtype = load.subtype;
 
-    private discoverDevices() {
-        // Remove deleted ones
-        let requireRemoval: PlatformAccessory[] = [];
-        this.accessories.forEach((accessory) => {
-            // @ts-ignore
-            if(!this.config.accessories.find(existing => existing.displayName === accessory.displayName)) {
-                this.log.info(`Removing accessory not found in config ${accessory.displayName}`);
-                requireRemoval.push(new this.api.platformAccessory(accessory.displayName, accessory.UUID));
-            }
-        });
-        this.log.info(`Removing ${requireRemoval.length} items`);
-        requireRemoval.forEach(item => {
-            this.accessories = this.accessories.filter(obj => obj !== item);
-            this.api.unregisterPlatformAccessories(PLUGIN_NAME,PLATFORM_NAME,requireRemoval);
-        })
+        this.addAccessory(newAccessory);
+      });
+      // Get Shades
+      const shades = await this.Processor.getShades();
+      shades.forEach((load) => {
+        const uuid = this.HAP.uuid.generate(`${load.displayName}${load.id}`);
+        if(this.accessories.find(accessory => accessory.UUID === uuid)) return;
+        const newAccessory = new this.Accessory(`${load.displayName}${load.id}`, uuid);
+        newAccessory.context.id = load.id;
+        newAccessory.context.type = 'WindowCovering'
+        newAccessory.context.subtype = 'shade';
 
-        // Add new ones
-        // @ts-ignore
-        this.config.accessories.forEach((accessory) => {
-            if(!this.accessories.find(existing => existing.displayName === accessory.displayName)) {
+        this.addAccessory(newAccessory);
+      });
 
-                this.addAccessory(accessory)
-            }
-        });
+      // Remove deleted ones
+      let requireRemoval: PlatformAccessory[] = [];
+      this.accessories.forEach((accessory) => {
+        if(accessory.context.type == 'Lightbulb') {
+          if(!lights.find(light => light.id == accessory.context.id && accessory.context.type == 'Lightbulb')) {
+            this.log.info(`Removing accessory not found in config ${accessory.displayName} ${accessory.context.id}`);
+            requireRemoval.push(new this.api.platformAccessory(accessory.displayName, accessory.UUID));
+          }
+        } else if(accessory.context.type == 'WindowCovering') {
+          if(!shades.find(shade => shade.id == accessory.context.id && accessory.context.type == 'WindowCovering')) {
+            this.log.info(`Removing accessory not found in config ${accessory.displayName} ${accessory.context.id}`);
+            requireRemoval.push(new this.api.platformAccessory(accessory.displayName, accessory.UUID));
+          }
+        }
+      });
+
+      this.log.info(`Removing ${requireRemoval.length} items`);
+      requireRemoval.forEach(item => {
+          this.accessories = this.accessories.filter(obj => obj !== item);
+          this.api.unregisterPlatformAccessories(PLUGIN_NAME,PLATFORM_NAME,[item]);
+      });
     }
 }
-

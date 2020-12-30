@@ -22,6 +22,12 @@
         "type": "number",
         "required": true,
         "default": "41900"
+      },
+      "slot": {
+        "title": "Slot Cross Colours Running In",
+        "type": "number",
+        "required": true,
+        "default": 1
       }
     }
   }

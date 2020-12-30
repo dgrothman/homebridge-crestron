@@ -1,17 +1,27 @@
 import {Socket} from "net";
-import {Logging} from "homebridge";
+import {Logging, PlatformAccessory} from "homebridge";
+import {CrosscolourLight} from "./crosscolour-light";
+import {ConfigRoom, CrosscolourConfig} from "./model/CrosscolourConfig";
+import {CrosscolourShade} from "./crosscolour-shade";
 const struct = require('python-struct');
+const axios = require('axios');
 
 export class CrestronProcessor {
     private readonly ipAddress: string;
     private readonly port: number;
+    private readonly slot: number;
     private client: Socket = new Socket();
+    private config: CrosscolourConfig | undefined;
+    private lights: CrosscolourLight[] = [];
+    private shades: CrosscolourShade[] = [];
     private readonly log: Logging;
 
-    constructor(ipAddress: string, port: number, log: Logging, useCache: boolean) {
+    constructor(ipAddress: string, port: number, log: Logging, slot: number) {
         this.ipAddress = ipAddress;
         this.port = port;
         this.log = log;
+        this.slot = slot < 10 ? slot : 0;
+        this.slot = parseInt('4171' + slot.toString());
         this.connectToServer();
     }
 
@@ -21,7 +31,6 @@ export class CrestronProcessor {
         this.client.connect(this.port, this.ipAddress);
         this.client.on('connect', () => {
             console.log('Server Connected');
-            this.setSerial(1,'TESTING');
         });
         this.client.on('data', (data) => {
             // Digital Join
@@ -62,10 +71,16 @@ export class CrestronProcessor {
         });
     }
 
-    sendData(data: Buffer) {
-        this.client.write(data);
+    sendData(type: string, subtype: string, ...parameters: any) {
+        let data = `{type: ${type}, subtype: ${subtype}`;
+        parameters.forEach(item => {
+            data += `, ${item.key}: ${item.value}`;
+        });
+
+        this.client.write(Buffer.from( data,'utf8'));
     }
 
+    /*
     setAnalog(join: number, value: number) {
         const analogData = struct.pack('>BBBB',
             parseInt('11000000',  2) | (value >> 10 & parseInt('00110000',2)) | (join - 1) >> 7,
@@ -97,11 +112,60 @@ export class CrestronProcessor {
         this.log.info(`Sending ${value} on join ${join}`);
         this.sendData(serialData);
     }
+     */
 
-    loadDim(id, level, time?) {
-        // const thisTime = time || 1;
+    loadDim(id, level) {
+        this.sendData('lighting','set', {'id': id, 'level': level});
     }
-    rgbLoadDissolveHSL(id, h, s, l, time?) {
-        // const thisTime = time || 500;
+    
+    loadRgbChange(id, h, s, l) {
+        const hslRgb = require('hsl-rgb');
+        const rgb: number[] = hslRgb(h,s/100,l/100);
+        this.sendData('lighting','set', {'id': id, 'rgb': rgb});
+    }
+    getLightLevel(id): number {
+        return 0;
+    }
+    getLightSat(id): number {
+        return 50;
+    }
+    getLightHue(id): number {
+        return 50;
+    }
+    setWindowPosition(id, position) {
+
+    }
+    getWindowPosition(id): number {
+        return 50;
+    }
+    async getConfig() {
+        this.log.debug(`Getting Config from http://${this.ipAddress}:${this.slot}/xml/api/config`);
+        this.config = await axios.get(`http://${this.ipAddress}:${this.slot}/xml/api/config`);
+        this.log.info(`Got Config From API with ${this.config?.data.SysConfig.Room.length} Areas`);
+
+        // Lights
+        this.lights = [];
+        this.config?.data.SysConfig.LLoad.forEach((load) => {
+            const loadArea = this.config?.data.SysConfig.Room.find((room) => room.LightsID === load.AreaID);
+            const light = new CrosscolourLight(load.Name,load.LoadID,loadArea);
+            light.subtype = 'rgb';
+            this.lights.push(light);
+        });
+
+        // Shades
+        this.shades = [];
+        this.config?.data.SysConfig.SLoad.forEach((load) => {
+            const loadArea = this.config?.data.SysConfig.Room.find((room) => room.ShadesID === load.AreaID);
+            const shade = new CrosscolourShade(load.Name,load.LoadID,loadArea);
+            this.shades.push(shade);
+        });
+    }
+    async getLights(): Promise<CrosscolourLight[]> {
+        if(this.config == undefined) await this.getConfig();
+        return this.lights;
+    }
+    async getShades(): Promise<CrosscolourShade[]> {
+        if(this.config == undefined) await this.getConfig();
+        return this.shades;
     }
 }
