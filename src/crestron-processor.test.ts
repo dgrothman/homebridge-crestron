@@ -1,17 +1,26 @@
 import {CrestronProcessor} from "./crestron-processor";
 import {TestLogger} from "./testing/test-logger";
 
-test('getLights',async () => {
-  const logger = new TestLogger('getLights verification');
-  // @ts-ignore
-  const processor = new CrestronProcessor('192.168.0.249',41900,logger,1);
-  const lights = await processor.getLights();
-  expect(lights.length).toEqual(3);
+describe('Processor Testing', () => {
+  let logger: TestLogger;
+  let processor: CrestronProcessor;
+  beforeEach(() => {
+    logger = new TestLogger('getLights verification');
+    // @ts-ignore
+    processor = new CrestronProcessor('192.168.0.249',41900,logger,1);
+  });
+  test('getLights',async () => {
+    const lights = await processor.getLights();
+    expect(lights.length).toEqual(3);
+  });
+  test('getShades',async () => {
+    const shades = await processor.getShades();
+    expect(shades.length).toEqual(4);
+  });
+  test('sendData loadDim', async () => {
+    processor.loadDim(1011,100);
+    processor.loadDim(1011,0);
+  })
 });
-test('getShades',async () => {
-  const logger = new TestLogger('getShades verification');
-  // @ts-ignore
-  const processor = new CrestronProcessor('192.168.0.249',41900,logger,1);
-  const shades = await processor.getShades();
-  expect(shades.length).toEqual(4);
-});
+
+

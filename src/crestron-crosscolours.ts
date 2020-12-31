@@ -97,7 +97,6 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
             })
             .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
               this.log.info(`getBrightness ${accessory.context.id} = ${accessory.context.bri}`);
-              accessory.context.bri = this.Processor.getLightLevel(accessory.context.id);
               callback(null, accessory.context.bri);
             })
         }
@@ -111,7 +110,6 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
               callback(null);
             })
             .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
-              accessory.context.sat = this.Processor.getLightSat(accessory.context.id);
               callback(null, accessory.context.sat);
             });
           lightbulbService.getCharacteristic(this.Characteristic.Hue)
@@ -122,7 +120,6 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
               callback(null);
             })
             .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
-              accessory.context.hue = this.Processor.getLightHue(accessory.context.id);
               callback(null, accessory.context.hue);
             });
         }
@@ -137,7 +134,6 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
             callback(null);
           })
           .on(CharacteristicEventTypes.GET, (callback) => {
-            accessory.context.position = this.Processor.getWindowPosition(accessory.context.id);
             callback(null, accessory.context.position);
           })
         break;
