@@ -72,12 +72,6 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
         lightbulbService!.getCharacteristic(this.Characteristic.On)
           .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
             this.log.info(`${accessory.displayName} Light was set to: ${value}`);
-            accessory.context.power = (value > 0);
-            if (accessory.context.power && accessory.context.bri == 0) {
-              accessory.context.bri = 100;
-            } else {
-              accessory.context.bri = 0;
-            }
             this.Processor.loadDim(accessory.context.id, +!!accessory.context.power * accessory.context.bri);
             callback(null);
           })
@@ -104,9 +98,7 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
           this.log.info(`Light is rgb`);
           lightbulbService.getCharacteristic(this.Characteristic.Saturation)
             .on(this.HAP.CharacteristicEventTypes.SET, (level, callback) => {
-              accessory.context.power = true;
-              accessory.context.sat = level;
-              this.Processor.loadRgbChange(accessory.context.id, accessory.context.hue, accessory.context.sat, accessory.context.bri)
+              this.Processor.loadSaturationChange(accessory.context.id, level)
               callback(null);
             })
             .on(this.HAP.CharacteristicEventTypes.GET, (callback) => {
@@ -129,13 +121,26 @@ export class CrestronCrosscolours implements DynamicPlatformPlugin {
         accessory.getService(this.Service.WindowCovering)!.getCharacteristic(this.Characteristic.TargetPosition)
           .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
             this.log.info(`${accessory.displayName} WindowCovering was set to: ${value}`);
-            accessory.context.position = value;
             this.Processor.setWindowPosition(accessory.context.id,value);
             callback(null);
           })
           .on(CharacteristicEventTypes.GET, (callback) => {
-            callback(null, accessory.context.position);
+            this.log.info(`GET target position for accessory ${accessory.context.id}`);
+            const pos = this.Processor.getWindowPosition(accessory.context.id);
+            callback(null, pos);
           })
+        accessory.getService(this.Service.WindowCovering)!.getCharacteristic(this.Characteristic.CurrentPosition)
+          .on(CharacteristicEventTypes.GET, (callback) => {
+            this.log.info(`GET current position for accessory ${accessory.context.id}`);
+            const pos = this.Processor.getWindowPosition(accessory.context.id);
+            callback(null, pos);
+          });
+        accessory.getService(this.Service.WindowCovering)!.getCharacteristic(this.Characteristic.PositionState)
+          .on(CharacteristicEventTypes.GET, (callback) => {
+            this.log.info(`GET position state for accessory ${accessory.context.id}`);
+            const state = this.Processor.getWindowState(accessory.context.id);
+            callback(null, state);
+          });
         break;
     }
   }

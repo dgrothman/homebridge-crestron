@@ -18,8 +18,11 @@ describe('Processor Testing', () => {
     expect(shades.length).toEqual(4);
   });
   test('sendData loadDim', async () => {
-    processor.loadDim(1011,100);
-    processor.loadDim(1011,0);
+    processor.setWindowPosition(1032,0);
+    await setTimeout((id) => {
+      const pos = processor.getWindowPosition(id);
+    },10000, 1032);
+    processor.getWindowPosition(1032);
   })
 });
 

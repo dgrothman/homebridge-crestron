@@ -36,34 +36,94 @@ export class CrestronProcessor {
         });
         this.client.on('data', (data) => {
             this.log.info(`data received`);
-            this.log.info(data.toString());
-            const jsonData: any = data.toString();
-            switch (jsonData.domain) {
+            let hea: HubEventArgs = new HubEventArgs(0,0,0,0,0,"","");
+            try {
+                hea = JSON.parse(data.toString());
+            } catch (e) {
+                this.log.warn(`json parse failed for ${data.toString()}`);
+            }
+            switch (hea.Domain) {
                 case CoreTag.tagLight:
-                    this.log.info('received light domain');
+                    const load = this.lights.find(l => l.id === hea.requestBy);
+                    if(load == undefined) return;
+                    if(hea.etag == EventTag.tagUpdate) {
+                        load.brightness = hea.Level;
+                    }
+                    break;
+                case CoreTag.tagShade:
+                    const shade = this.shades.find(s => s.id === hea.requestBy);
+                    if(shade == undefined) return;
+                    this.log.info(`Shade ${shade.displayName} update`);
+                    if(hea.etag == EventTag.tagUpdate as number) {
+                        if(shade.position < hea.Level) {
+                            shade.state = 0;
+                            this.log.info(`Shade ${shade.displayName} state decreasing`);
+                        } else {
+                            shade.state = 1;
+                            this.log.info(`Shade ${shade.displayName} state increasing`);
+                        }
+                        shade.position = hea.Level;
+                        this.log.info(`Shade ${shade.displayName} position ${hea.Level}`);
+                        setTimeout((id) => {
+                            const shade = this.shades.find(s => s.id === hea.requestBy);
+                            if(shade == undefined) return;
+                            shade.state = 2;
+                            this.log.info(`Shade ${shade.displayName} state stopped`);
+                        }, 15000, shade.id);
+                    }
                     break;
             }
         });
         this.client.on('close',async () => {
             this.log.info('connection closed');
             try {
-                //await(500);
-                //this.client.connect(this.port, this.ipAddress);
+                await this.delay(10000);
+                this.client.connect(this.port, this.ipAddress);
             } catch (err) {
                 this.log.error(`CCCP Error reconnecting to server, ${err}`);
             }
         });
     }
 
-    sendData(data : HubEventArgs) {
-        this.client.write(Buffer.from( JSON.stringify(data),'utf8'));
+    async sendData(data : HubEventArgs) {
+        try {
+            await this.client.write(Buffer.from( JSON.stringify(data),'utf8'));
+        } catch (e) {
+            this.log.error(`Unable to send Data, socket not connected`);
+        }
     }
 
     loadDim(id, level) {
         const hea = new HubEventArgs(id,0,EventTag.tagLevelSet,EventTag.tagPress,level,"",CoreTag.tagLight);
         this.sendData(hea);
     }
-    
+
+    loadSaturationChange(id, s) {
+
+    }
+    queryAccessory(id, domain) {
+        const hea = new HubEventArgs(id, 0, EventTag.tagQuery, EventTag.tagQuery, 0, "", domain);
+        this.log.info(`query for ${domain} with id ${id}`)
+        this.sendData(hea);
+    }
+    getLoadLevel(id): number {
+        const load = this.lights.find(l => l.id === id);
+        if(load === undefined) return(0);
+        return load.brightness;
+    }
+
+    getWindowPosition(id): number {
+        const shade = this.shades.find(s => s.id === id);
+        if(shade === undefined) return(0);
+        return shade.position;
+    }
+
+    getWindowState(id): number {
+        const shade = this.shades.find(s => s.id === id);
+        if(shade === undefined) return(0);
+        return shade.state;
+    }
+
     loadRgbChange(id, h, s, l) {
         const hslRgb = require('hsl-rgb');
         const rgb: number[] = hslRgb(h,s/100,l/100);
@@ -85,19 +145,23 @@ export class CrestronProcessor {
 
         // Lights
         this.lights = [];
-        this.config?.data.SysConfig.LLoad.forEach((load) => {
+        this.config?.data.SysConfig.LLoad.forEach(async (load) => {
             const loadArea = this.config?.data.SysConfig.Room.find((room) => room.LightsID === load.AreaID);
             const light = new CrosscolourLight(load.Name,load.LoadID,loadArea);
             light.subtype = 'rgb';
             this.lights.push(light);
+            await this.delay(5000);
+            this.queryAccessory(load.LoadID, CoreTag.tagLight);
         });
 
         // Shades
         this.shades = [];
-        this.config?.data.SysConfig.SLoad.forEach((load) => {
+        this.config?.data.SysConfig.SLoad.forEach( async (load) => {
             const loadArea = this.config?.data.SysConfig.Room.find((room) => room.ShadesID === load.AreaID);
             const shade = new CrosscolourShade(load.Name,load.LoadID,loadArea);
             this.shades.push(shade);
+            await this.delay(5000);
+            this.queryAccessory(load.LoadID, CoreTag.tagShade);
         });
     }
     async getLights(): Promise<CrosscolourLight[]> {
@@ -107,5 +171,9 @@ export class CrestronProcessor {
     async getShades(): Promise<CrosscolourShade[]> {
         if(this.config == undefined) await this.getConfig();
         return this.shades;
+    }
+
+    delay(ms: number) {
+        return new Promise( resolve => setTimeout(resolve, ms) );
     }
 }
