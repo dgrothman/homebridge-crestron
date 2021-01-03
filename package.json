@@ -28,8 +28,7 @@
   ],
   "dependencies": {
     "axios": "^0.21.1",
-    "hsl-rgb": "^1.0.0",
-    "python-struct": "^1.1.3"
+    "hsl-rgb": "^1.0.0"
   },
   "devDependencies": {
     "@types/jest": "^26.0.19",

@@ -4,15 +4,13 @@ import {CrosscolourLight} from "./crosscolour-light";
 import {CrosscolourConfig} from "./model/CrosscolourConfig";
 import {CrosscolourShade} from "./crosscolour-shade";
 import {CoreTag, EventTag, HubEventArgs} from "./model/WeakEntitites";
-
-const struct = require('python-struct');
 const axios = require('axios');
 
 export class CrestronProcessor {
     private readonly ipAddress: string;
     private readonly port: number;
     private readonly slot: number;
-    private client: Socket = new Socket();
+    private client: JsonSocket = new JsonSocket(new Socket());
     private config: CrosscolourConfig | undefined;
     private lights: CrosscolourLight[] = [];
     private shades: CrosscolourShade[] = [];
@@ -30,7 +28,7 @@ export class CrestronProcessor {
     connectToServer() {
         this.log.info(`CCCP connection info: ${this.ipAddress}:${this.port}`);
         this.log.info("CrestronCrossColours ConnectingToServer");
-        this.client.connect(this.port, this.ipAddress);
+        this.client.connect({host: this.ipAddress, port: this.port});
         this.client.on('connect', () => {
             console.log('Server Connected');
         });
@@ -38,6 +36,7 @@ export class CrestronProcessor {
             this.log.info(`data received`);
             let hea: HubEventArgs = new HubEventArgs(0,0,0,0,0,"","");
             try {
+
                 hea = JSON.parse(data.toString());
             } catch (e) {
                 this.log.warn(`json parse failed for ${data.toString()}`);
@@ -78,7 +77,7 @@ export class CrestronProcessor {
             this.log.info('connection closed');
             try {
                 await this.delay(10000);
-                this.client.connect(this.port, this.ipAddress);
+                this.client.connect({port: this.port, host: this.ipAddress});
             } catch (err) {
                 this.log.error(`CCCP Error reconnecting to server, ${err}`);
             }
@@ -87,7 +86,7 @@ export class CrestronProcessor {
 
     async sendData(data : HubEventArgs) {
         try {
-            await this.client.write(Buffer.from( JSON.stringify(data),'utf8'));
+            await this.client.write(JSON.stringify(data));
         } catch (e) {
             this.log.error(`Unable to send Data, socket not connected`);
         }
