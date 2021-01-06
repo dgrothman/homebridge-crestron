@@ -5,12 +5,13 @@ import {CrosscolourConfig} from "./model/CrosscolourConfig";
 import {CrosscolourShade} from "./crosscolour-shade";
 import {CoreTag, EventTag, HubEventArgs} from "./model/WeakEntitites";
 const axios = require('axios');
+const JsonSocket = require('json-socket');
 
 export class CrestronProcessor {
     private readonly ipAddress: string;
     private readonly port: number;
     private readonly slot: number;
-    private client: JsonSocket = new JsonSocket(new Socket());
+    private client = new JsonSocket(new Socket());
     private config: CrosscolourConfig | undefined;
     private lights: CrosscolourLight[] = [];
     private shades: CrosscolourShade[] = [];
@@ -32,7 +33,7 @@ export class CrestronProcessor {
         this.client.on('connect', () => {
             console.log('Server Connected');
         });
-        this.client.on('data', (data) => {
+        this.client.on('message', (data) => {
             this.log.info(`data received`);
             let hea: HubEventArgs = new HubEventArgs(0,0,0,0,0,"","");
             try {
@@ -86,7 +87,9 @@ export class CrestronProcessor {
 
     async sendData(data : HubEventArgs) {
         try {
-            await this.client.write(JSON.stringify(data));
+            var stringData = JSON.stringify(data);
+            this.log.info(`sending cmd ${stringData}`);
+            await this.client.sendMessage(JSON.stringify(data));
         } catch (e) {
             this.log.error(`Unable to send Data, socket not connected`);
         }

@@ -28,7 +28,8 @@
   ],
   "dependencies": {
     "axios": "^0.21.1",
-    "hsl-rgb": "^1.0.0"
+    "hsl-rgb": "^1.0.0",
+    "json-socket": "^0.3.0"
   },
   "devDependencies": {
     "@types/jest": "^26.0.19",
