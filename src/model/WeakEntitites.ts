@@ -23,9 +23,9 @@ export enum EventTag {
   tagClose,
   tagStop,
   tagAreaController,
-  tagPress,
+  tagPress = 101,
   tagRelease,
-  tagColorSet,
+  tagColorSet = 201,
   tagStarTwinklePress,
   tagStarDimmPress,
 }

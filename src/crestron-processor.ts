@@ -3,7 +3,7 @@ import {Logging} from "homebridge";
 import {CrosscolourLight} from "./crosscolour-light";
 import {CrosscolourConfig} from "./model/CrosscolourConfig";
 import {CrosscolourShade} from "./crosscolour-shade";
-import {CoreTag, EventTag, HubEventArgs} from "./model/WeakEntitites";
+import {CoreTag, EventTag, HubEventArgs,} from "./model/WeakEntitites";
 const axios = require('axios');
 const JsonSocket = require('json-socket');
 
@@ -32,9 +32,13 @@ export class CrestronProcessor {
         this.client.connect({host: this.ipAddress, port: this.port});
         this.client.on('connect', () => {
             console.log('Server Connected');
+
         });
-        this.client.on('message', (data) => {
-            this.log.info(`data received`);
+        this.client.on('message', (data)=> {
+            this.log.info(`message received ${data}`);
+        });
+        this.client.on('data', (data) => {
+            this.log.info(`data received ${data}`);
             let hea: HubEventArgs = new HubEventArgs(0,0,0,0,0,"","");
             try {
 
